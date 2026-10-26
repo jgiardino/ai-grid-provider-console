@@ -134,6 +134,25 @@ export const toOrganization = (json: ApiTenant): Organization => {
 const modelPhases: Record<string, string> = { pending: 'Pending', ready: 'Ready', failed: 'Failed' };
 
 /**
+ * A ManifestWork's phase for the UI: Ready when the spoke reports ready or Available, Failed when
+ * apply failed or the work is degraded, else Pending (still rolling out).
+ */
+export const workPhase = (work: {
+  applied?: string;
+  available?: string;
+  degraded?: string;
+  feedback?: { ready?: string };
+}): string => {
+  if (work.feedback?.ready === 'True' || work.available === 'True') {
+    return 'Ready';
+  }
+  if (work.applied === 'False' || work.degraded === 'True') {
+    return 'Failed';
+  }
+  return 'Pending';
+};
+
+/**
  * Maps a model of GET/POST /models to the PoC's ManagedModel. Status is PR 12's phase (Pending
  * before the backend reports one); locations are the placement's decided locations (P8).
  */
@@ -149,6 +168,10 @@ export const toManagedModel = (json: ApiModel): ManagedModel => ({
   creationTimestamp: json.creationTimestamp,
   resourceVersion: json.resourceVersion ?? '',
   locations: json.placement?.locations ?? [],
+  works: (json.rollout?.works ?? []).map((work) => ({
+    cluster: work.cluster,
+    phase: workPhase(work),
+  })),
   modelUri: json.modelUri,
   modelName: json.modelName,
   runtimeImage: json.runtimeImage,

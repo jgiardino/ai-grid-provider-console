@@ -90,12 +90,10 @@ it('walks the deployment wizard, selects locations, saves the model and removes 
   const table = await screen.findByTestId('model-deployments-table');
   expect(table).toHaveTextContent('Widget');
   expect(await screen.findByText('Model deployed')).toBeVisible();
-  // The first location, and the rest behind "+1 more".
+  // Compact grey labels for each location in the primary table.
   const locationsCell = screen.getByTestId('model-locations-widget');
-  expect(locationsCell).toHaveTextContent(site1);
-  await user.click(within(locationsCell).getByText('+1 more'));
-  expect(await screen.findByText('Locations (2)')).toBeVisible();
-  expect(screen.getAllByText(site2).length).toBeGreaterThan(0);
+  expect(within(locationsCell).getByText(site1)).toBeVisible();
+  expect(within(locationsCell).getByText(site2)).toBeVisible();
   const saved = (await service.listModels()).find((m) => m.name === 'widget');
   expect(saved).toMatchObject({
     namespace: 'ai-grid-models',
@@ -350,10 +348,40 @@ it('lists PR 12 models with their locations', async () => {
   expect(table).toHaveTextContent('Granite 8B Instruct');
   expect(table).toHaveTextContent('Tiny LLM (CPU)');
   expect(screen.getByTestId('model-locations-granite-8b-instruct')).toHaveTextContent(/^paris$/);
-  // No locations reads as a dash, with nothing to open.
+  // No locations reads as a dash, with the expand control disabled.
   const none = screen.getByTestId('model-locations-tiny-llm');
   expect(none).toHaveTextContent('—');
   expect(within(none).queryByRole('button')).not.toBeInTheDocument();
+});
+
+it('expands a model row to show per-site Location and Status', async () => {
+  const user = userEvent.setup();
+  renderAt('/models', serviceOnModelJson(modelJsonFetch()));
+  const graniteRow = await screen.findByTestId('model-row-granite-8b-instruct');
+  await user.click(within(graniteRow).getByRole('button', { name: 'Details' }));
+  const nested = await screen.findByTestId('model-site-deployments-granite-8b-instruct');
+  expect(nested).toHaveTextContent('Location');
+  expect(nested).toHaveTextContent('Status');
+  // Same location keys as the primary Locations cell (placement.locations), not every work cluster.
+  expect(within(nested).getByText('paris')).toBeVisible();
+  expect(within(nested).getByText('Ready')).toBeVisible();
+  // Hub-only models have no site rows, so there is no expand control.
+  const tiny = screen.getByTestId('model-row-tiny-llm');
+  expect(within(tiny).queryByRole('button', { name: 'Details' })).not.toBeInTheDocument();
+});
+
+it('keeps expanded locations aligned with the primary Locations column', async () => {
+  const user = userEvent.setup();
+  renderAt('/models', serviceOnModelJson(modelJsonFetch()));
+  // Mistral's placement selects four OpenShift spokes, but only locations with a location label
+  // appear in placement.locations (paris at golden time); the expand must not list the others.
+  const mistralRow = await screen.findByTestId('model-row-mistral-7b-instruct');
+  expect(screen.getByTestId('model-locations-mistral-7b-instruct')).toHaveTextContent('paris');
+  expect(screen.getByTestId('model-locations-mistral-7b-instruct')).not.toHaveTextContent('frankfurt');
+  await user.click(within(mistralRow).getByRole('button', { name: 'Details' }));
+  const nested = await screen.findByTestId('model-site-deployments-mistral-7b-instruct');
+  expect(within(nested).getByText('paris')).toBeVisible();
+  expect(within(nested).queryByText(/frankfurt|berlin|site-/)).not.toBeInTheDocument();
 });
 
 it('shows the phase', async () => {
@@ -361,20 +389,19 @@ it('shows the phase', async () => {
   renderAt('/models', serviceOnModelJson(modelJsonFetch()));
   const row = async (name: string) =>
     (await screen.findByTestId(`model-locations-${name}`)).closest('tr') as HTMLElement;
-  expect(within(await row('granite-8b-instruct')).getByTestId('model-phase')).toHaveTextContent('Ready');
+  const ready = within(await row('granite-8b-instruct')).getByTestId('model-phase');
+  expect(ready).toHaveTextContent('Ready');
+  // Ready is outline and not interactive; other high-level statuses open ModelStatusModal.
+  expect(within(ready).queryByRole('button')).not.toBeInTheDocument();
   expect(within(await row('codellama-13b')).getByTestId('model-phase')).toHaveTextContent('Pending');
   const failed = within(await row('llama-3-70b')).getByTestId('model-phase');
   expect(failed).toHaveTextContent('Failed');
   expect(screen.queryByText(/Git/)).not.toBeInTheDocument();
   await user.click(within(failed).getByRole('button', { name: 'Failed' }));
-  // A sentence and the next step; the controller's own words fold away under Details.
-  expect(await screen.findByText('Deployment failed')).toBeVisible();
+  expect(await screen.findByTestId('model-status-modal')).toBeVisible();
+  expect(screen.getByTestId('model-status-modal-subtitle')).toHaveTextContent('Deployment status');
+  expect(screen.getByText('Deployment failed')).toBeVisible();
   expect(screen.getByText('A runtime template this model needs isn’t installed on the hub.')).toBeVisible();
-  const raw = screen.getByText(/v3-6-0-kserve-config-llm-template-tpu" not found/);
-  expect(raw).not.toBeVisible();
-  await user.click(screen.getByRole('button', { name: 'Details' }));
-  expect(raw).toBeVisible();
-  expect(raw).toHaveTextContent(/^ConfigNotFound: /);
 });
 
 it('offers only eligible locations', async () => {

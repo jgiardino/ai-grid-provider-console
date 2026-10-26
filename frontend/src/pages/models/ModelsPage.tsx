@@ -2,6 +2,8 @@
 // Adapted from packages/model-serving/src/components/deployments/DeploymentsTable.tsx
 // and components/global/GlobalDeploymentsView.tsx.
 // upstream commit: 8051fbbea117457b4da4074fb2856b732e6677a4
+// Expandable per-site rows follow osac-bmaas ServicesModelsTable / InternalDeploymentsTable
+// (Location + Status only; compact grey labels in the primary Locations cell).
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -12,18 +14,19 @@ import {
   EmptyStateActions,
   EmptyStateBody,
   EmptyStateFooter,
+  Label,
+  LabelGroup,
   PageSection,
   Stack,
   ToolbarItem,
 } from '@patternfly/react-core';
-import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
+import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import type { ThProps } from '@patternfly/react-table';
 import type { UserService } from '../../api/ConsoleService';
 import { ServiceError } from '../../api/ConsoleService';
 import type { ClustersService } from '../../api/clusters';
-import type { ManagedModel } from '../../api/types';
+import type { GridCluster, ManagedModel } from '../../api/types';
 import { LoadError } from '../../components/LoadError';
-import { OverflowList } from '../../components/OverflowList';
 import { PageHeader } from '../../components/PageHeader';
 import { PageLoading } from '../../components/PageLoading';
 import { PaginatedTable } from '../../components/PaginatedTable';
@@ -33,8 +36,13 @@ import { ToolbarSearch } from '../../components/ToolbarSearch';
 import { TableEmptyRow } from '../../components/TableEmptyRow';
 import { useServiceData } from '../../hooks/useServiceData';
 import { EMPTY_VALUE } from '../../utilities/format';
-import { locationLabel, modelPath, siteNamesOf } from './modelUtils';
+import { getPhaseProps } from '../../utilities/phaseLabelUtils';
+import { DeploymentStatusModal } from './DeploymentStatusModal';
+import type { ModelSiteDeployment } from './modelUtils';
+import { locationLabel, modelPath, siteDeploymentsOf, siteNamesOf } from './modelUtils';
 import { ModelStatusLabel } from './ModelStatus';
+import { ModelStatusModal } from './ModelStatusModal';
+import { PARTIALLY_AVAILABLE, modelDisplayStatus } from './modelStatusInfo';
 import type { ModelDeleteService } from './useDeleteModel';
 import { useDeleteModel } from './useDeleteModel';
 
@@ -53,6 +61,52 @@ const columns: Column[] = [
 
 const keyOf = (model: ManagedModel) => `${model.namespace}/${model.name}`;
 
+const SiteStatusLabel: React.FC<{ phase: string; onClick: () => void }> = ({ phase, onClick }) => {
+  const { icon, status, color } = getPhaseProps(phase);
+  return (
+    <Label icon={icon} status={status} color={color} variant="filled" isClickable onClick={onClick}>
+      {phase}
+    </Label>
+  );
+};
+
+const ModelSiteDeploymentsTable: React.FC<{
+  model: ManagedModel;
+  clusters: GridCluster[];
+  siteNames: Map<string, string>;
+  onOpenStatus: (deployment: ModelSiteDeployment) => void;
+}> = ({ model, clusters, siteNames, onOpenStatus }) => {
+  const deployments = siteDeploymentsOf(model, clusters);
+  const title = model.displayName ?? model.name;
+  return (
+    <Table
+      aria-label={`Deployments for ${title}`}
+      variant="compact"
+      isNested
+      data-testid={`model-site-deployments-${model.name}`}
+    >
+      <Thead>
+        <Tr resetOffset>
+          <Th>Location</Th>
+          <Th modifier="fitContent">Status</Th>
+        </Tr>
+      </Thead>
+      <Tbody>
+        {deployments.map((deployment) => (
+          <Tr key={deployment.id} resetOffset>
+            <Td dataLabel="Location">
+              <Label color="grey">{locationLabel(deployment.location, siteNames)}</Label>
+            </Td>
+            <Td dataLabel="Status" modifier="fitContent">
+              <SiteStatusLabel phase={deployment.phase} onClick={() => onOpenStatus(deployment)} />
+            </Td>
+          </Tr>
+        ))}
+      </Tbody>
+    </Table>
+  );
+};
+
 export const ModelsPage: React.FC<Props> = ({ service }) => {
   const navigate = useNavigate();
   const [deployments, loaded, error, refresh] = useServiceData<ManagedModel[]>(() => service.listModels(), []);
@@ -62,6 +116,12 @@ export const ModelsPage: React.FC<Props> = ({ service }) => {
   const canWrite = !!user?.isProviderAdmin;
   const [filter, setFilter] = useState('');
   const [sortBy, setSortBy] = useState<{ index: number; direction: 'asc' | 'desc' }>({ index: 0, direction: 'asc' });
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [statusModal, setStatusModal] = useState<{
+    model: ManagedModel;
+    deployment: ModelSiteDeployment;
+  } | null>(null);
+  const [modelStatusModal, setModelStatusModal] = useState<ManagedModel | null>(null);
   const [confirmDelete, deleteModal] = useDeleteModel(service, {
     models: deployments,
     refresh: () => void refresh(),
@@ -77,6 +137,18 @@ export const ModelsPage: React.FC<Props> = ({ service }) => {
       )
       .sort((a, b) => (sortBy.direction === 'asc' ? compare(a, b) : compare(b, a)));
   }, [deployments, filter, sortBy]);
+
+  const toggleExpanded = (id: string) => {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
 
   const deployButton = canWrite ? (
     <Button component={(props) => <Link {...props} to="/models/deploy" />}>Deploy model</Button>
@@ -138,13 +210,10 @@ export const ModelsPage: React.FC<Props> = ({ service }) => {
           }
         >
           {(pageRows) => (
-            <Table
-              aria-label="Model deployments"
-
-              data-testid="model-deployments-table"
-            >
+            <Table aria-label="Model deployments" isExpandable data-testid="model-deployments-table">
               <Thead>
                 <Tr>
+                  <Th screenReaderText="Row expansion" />
                   {columns.map((c, i) => (
                     <Th key={c.label} sort={sortParams(i)} modifier="wrap">
                       {c.label}
@@ -156,17 +225,33 @@ export const ModelsPage: React.FC<Props> = ({ service }) => {
               {rows.length === 0 ? (
                 <Tbody>
                   <TableEmptyRow
-                    colSpan={columns.length + 1}
+                    colSpan={columns.length + 1 + (canWrite ? 1 : 0)}
                     body="Change the filter to see more models."
                     onClear={() => setFilter('')}
                   />
                 </Tbody>
               ) : (
-                <Tbody>
-                  {pageRows.map((deployment) => {
-                    const title = deployment.displayName ?? deployment.name;
-                    return (
-                      <Tr key={keyOf(deployment)}>
+                pageRows.map((deployment, rowIndex) => {
+                  const title = deployment.displayName ?? deployment.name;
+                  const id = keyOf(deployment);
+                  const siteRows = siteDeploymentsOf(deployment, clusters);
+                  const hasSites = siteRows.length > 0;
+                  const isExpanded = hasSites && expanded.has(id);
+                  return (
+                    <Tbody key={id} isExpanded={isExpanded} data-testid={`model-row-${deployment.name}`}>
+                      <Tr isContentExpanded={isExpanded}>
+                        {hasSites ? (
+                          <Td
+                            expand={{
+                              rowIndex,
+                              isExpanded,
+                              onToggle: () => toggleExpanded(id),
+                              expandId: `expand-${deployment.name}`,
+                            }}
+                          />
+                        ) : (
+                          <Td />
+                        )}
                         <Td dataLabel="Name">
                           <Link to={modelPath(deployment)}>{title}</Link>
                         </Td>
@@ -175,16 +260,27 @@ export const ModelsPage: React.FC<Props> = ({ service }) => {
                         </Td>
                         <Td dataLabel="Replicas">{deployment.replicas ?? EMPTY_VALUE}</Td>
                         <Td dataLabel="Locations" data-testid={`model-locations-${deployment.name}`}>
-                          <OverflowList
-                            noun="Locations"
-                            items={deployment.locations.map((location) => locationLabel(location, siteNames))}
-                          />
+                          {deployment.locations.length === 0 ? (
+                            EMPTY_VALUE
+                          ) : (
+                            <LabelGroup numLabels={4} data-testid={`model-location-labels-${deployment.name}`}>
+                              {deployment.locations.map((location) => (
+                                <Label key={location} color="grey" isCompact>
+                                  {locationLabel(location, siteNames)}
+                                </Label>
+                              ))}
+                            </LabelGroup>
+                          )}
                         </Td>
                         <Td dataLabel="Created" modifier="nowrap">
                           <RelativeTime time={deployment.creationTimestamp} />
                         </Td>
                         <Td dataLabel="Status">
-                          <ModelStatusLabel model={deployment} />
+                          <ModelStatusLabel
+                            model={deployment}
+                            clusters={clusters}
+                            onOpen={() => setModelStatusModal(deployment)}
+                          />
                         </Td>
                         {canWrite && (
                           <Td isActionCell>
@@ -210,9 +306,27 @@ export const ModelsPage: React.FC<Props> = ({ service }) => {
                           </Td>
                         )}
                       </Tr>
-                    );
-                  })}
-                </Tbody>
+                      {hasSites && (
+                        <Tr isExpanded={isExpanded}>
+                          <Td />
+                          <Td noPadding colSpan={columns.length}>
+                            <ExpandableRowContent>
+                              <div className="pf-v6-u-pb-lg">
+                                <ModelSiteDeploymentsTable
+                                  model={deployment}
+                                  clusters={clusters}
+                                  siteNames={siteNames}
+                                  onOpenStatus={(site) => setStatusModal({ model: deployment, deployment: site })}
+                                />
+                              </div>
+                            </ExpandableRowContent>
+                          </Td>
+                          {canWrite && <Td />}
+                        </Tr>
+                      )}
+                    </Tbody>
+                  );
+                })
               )}
             </Table>
           )}
@@ -230,6 +344,47 @@ export const ModelsPage: React.FC<Props> = ({ service }) => {
         <PageSection isFilled>{body()}</PageSection>
       )}
       {deleteModal}
+      {statusModal && (
+        <DeploymentStatusModal
+          model={statusModal.model}
+          deployment={statusModal.deployment}
+          locationLabel={locationLabel(statusModal.deployment.location, siteNames)}
+          onClose={() => setStatusModal(null)}
+          onEdit={
+            canWrite
+              ? () => {
+                  setStatusModal(null);
+                  navigate(`${modelPath(statusModal.model)}/edit`);
+                }
+              : undefined
+          }
+          onStop={
+            canWrite
+              ? () => {
+                  const model = statusModal.model;
+                  setStatusModal(null);
+                  confirmDelete(model);
+                }
+              : undefined
+          }
+        />
+      )}
+      {modelStatusModal && (
+        <ModelStatusModal
+          model={modelStatusModal}
+          clusters={clusters}
+          onClose={() => setModelStatusModal(null)}
+          onViewDeployments={
+            modelDisplayStatus(modelStatusModal, clusters) === PARTIALLY_AVAILABLE
+              ? () => {
+                  const id = keyOf(modelStatusModal);
+                  setModelStatusModal(null);
+                  setExpanded((current) => new Set(current).add(id));
+                }
+              : undefined
+          }
+        />
+      )}
     </>
   );
 };

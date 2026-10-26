@@ -192,7 +192,7 @@ field, and `areas/*.md` what the fake derives from them.
 | `local-cluster` | `ready` | the hub itself |
 | `site-paris-1` | `ready` | enrolled and provisioned, 16 GPUs, site name and coordinates |
 | `site-frankfurt-1` | `ready` | not enrolled (no `ai-grid/*` labels), 8 GPUs, add-on `application-manager` `unhealthy` |
-| `site-madrid-1` | `unknown` | lease expired, `unreachable` taint, add-ons `unreachable`; enrolled and provisioned |
+| `site-madrid-1` | `unknown` | lease expired, `unreachable` taint, add-ons `unreachable`; enrolled and provisioned; `ai-grid-mock/fail-apply=mistral-7b-instruct` so only Mistral fails to apply here after the lease recovers (Granite stays Ready) |
 | `site-ashburn-1` | `offline` | API server down, `unavailable` taint; add-ons still `available` (the hub changes them only on a lost lease) |
 | `site-berlin-1` | `importing` | no claims yet |
 | `site-oslo-1` | `pendingimport` | |
@@ -214,8 +214,8 @@ tenant has `resourceVersion` `"1"`. Replace the file with `{"unavailable": "<tex
 | Model | `phase` at start | What it shows |
 |---|---|---|
 | `tiny-llm` | `ready` | a hub deployment, no placement |
-| `granite-8b-instruct` | `ready` (`Complete`) | placed on enrolled and provisioned sites: `site-paris-1` at start; `site-madrid-1` joins at 300 s, when its lease recovers (`pending` until about 345 s, then `ready` on two sites) |
-| `mistral-7b-instruct` | `pending` (`NotAsExpected` at 0 s, then `Processing`) | created when the fake starts; a Progressive rollout one site at a time in cluster-name order: `site-frankfurt-1` at once (ready at about 45 s), `site-berlin-1` (selected once it joins at 20 s; applied at about 75 s, after `minSuccessTime` 30 s), `site-paris-1` (applied at about 150 s), `ready` at about 195 s; `site-madrid-1` is added at 300 s (`pending` again until about 345 s) |
+| `granite-8b-instruct` | `ready` (`Complete`) | placed on enrolled and provisioned sites: `site-paris-1` at start; `site-madrid-1` joins at 300 s (`pending` until about 345 s, then Ready on Paris and Madrid) |
+| `mistral-7b-instruct` | `pending` (`NotAsExpected` at 0 s, then `Processing`) | Progressive rollout one OpenShift spoke at a time; after Madrid joins at 300 s its work fails to apply (`fail-apply` lists this model only), so the model reads `failed`/`NotAsExpected` while Paris stays Ready |
 | `llama-3-70b` | `failed` (`ConfigNotFound`) | a preset the hub lacks |
 | `codellama-13b` | `pending` (`PlacementDecisionEmpty`) | a placement that matches no cluster |
 
@@ -238,7 +238,7 @@ lifecycles alike. Restart the fake to replay.
 | 30 s | `edge-lyon-2` finishes detaching and disappears from the list |
 | 70 s | `site-berlin-1`'s `ManagedClusterImportSucceeded` condition turns True (and its `resourceVersion` moves); `status` stays `ready` |
 | 90 s, 130 s | `site-berlin-1` add-ons become available (three, then all seven) |
-| 300 s | `site-madrid-1` recovers its lease: `unknown` to `ready`; `granite-8b-instruct` and `mistral-7b-instruct` roll out to it (both `pending` until its work is ready, about 45 s later) |
+| 300 s | `site-madrid-1` recovers its lease: `unknown` to `ready`; `granite-8b-instruct` becomes Ready on Paris and Madrid; `mistral-7b-instruct` fails to apply on Madrid only (`ai-grid-mock/fail-apply=mistral-7b-instruct`) and reads `failed`/`NotAsExpected` |
 
 A model created with `POST /api/v1/models` (and `mistral-7b-instruct` at start) walks
 KServe's conditions, counted from its creation:
@@ -267,7 +267,8 @@ reads `pending` with that reason for good: no condition tells it apart from a sl
 spoke such a model keeps its work `Progressing` and the placed model reads
 `pending`/`Processing` for good; the rollout's `progressDeadline` times that cluster out (a
 `Progressive` rollout moves on to the next one), which no condition shows; a cluster labelled
-`ai-grid-mock/fail-apply=true` fails to apply its work: the model reads `failed`/`NotAsExpected`
+`ai-grid-mock/fail-apply=true` (or a comma-separated list of model names) fails to apply
+matching works: the model reads `failed`/`NotAsExpected`
 and the work `applied: "False"`, `available: "Unknown"`, with
 `Applied=False/AppliedManifestWorkFailed` "Failed to apply manifest work" (the manifest's own
 text, `Failed to apply manifest: the server doesn't have a resource type "LLMInferenceService"`,

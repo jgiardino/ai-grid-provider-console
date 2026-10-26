@@ -24,7 +24,7 @@ import { useServiceData } from '../../hooks/useServiceData';
 import { formatDateTime } from '../../utilities/format';
 import { locationLabel, modelPath, siteNamesOf } from './modelUtils';
 import { ModelStatusDetails, ModelStatusLabel } from './ModelStatus';
-import { hasModelStatusDetails, modelPhase, modelStatusTitle } from './modelStatusInfo';
+import { hasModelStatusDetails, modelDisplayStatus, modelPhase, modelStatusTitle } from './modelStatusInfo';
 import type { ModelDeleteService } from './useDeleteModel';
 import { useDeleteModel } from './useDeleteModel';
 
@@ -60,13 +60,14 @@ export const ModelDetailsPage: React.FC<Props> = ({ service }) => {
       );
     }
     const phase = modelPhase(model);
+    const status = modelDisplayStatus(model, clusters);
     return (
       <Flex direction={{ default: 'column' }} spaceItems={{ default: 'spaceItemsXl' }}>
-        {phase !== 'Ready' && hasModelStatusDetails(model) && (
+        {status !== 'Ready' && status !== 'Partially available' && hasModelStatusDetails(model, clusters) && (
           <Alert
             isInline
             variant={phase === 'Failed' ? 'danger' : 'info'}
-            title={modelStatusTitle(model)}
+            title={modelStatusTitle(model, clusters)}
             data-testid="model-status-alert"
           >
             <ModelStatusDetails model={model} />
@@ -111,7 +112,7 @@ export const ModelDetailsPage: React.FC<Props> = ({ service }) => {
     <>
       <PageHeader
         title={title}
-        status={model && <ModelStatusLabel model={model} />}
+        status={model && <ModelStatusLabel model={model} clusters={clusters} />}
         headerAction={
           model &&
           user?.isProviderAdmin && (

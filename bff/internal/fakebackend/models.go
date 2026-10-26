@@ -523,8 +523,30 @@ func (s *Server) applyWork(m *model, tmpl *aigridv1.ModelSpec, cluster string, t
 	}
 	w.startedAt, w.agentStart, w.frozenAt = t, nil, nil
 	w.spec = cloneSpec(tmpl)
-	w.failApply = s.clusters[cluster].GetLabels()[LabelFailApply] == "true"
+	w.failApply = failApplyFor(s.clusters[cluster], m.obj.GetName())
 	s.observeAgent(w, t)
+}
+
+// failApplyFor is whether a cluster's ai-grid-mock/fail-apply label fails this
+// model's work: "true" fails every model; otherwise a comma-separated list of
+// model names.
+func failApplyFor(cluster *aigridv1.ManagedCluster, modelName string) bool {
+	if cluster == nil {
+		return false
+	}
+	v := strings.TrimSpace(cluster.GetLabels()[LabelFailApply])
+	if v == "" || v == "false" {
+		return false
+	}
+	if v == "true" {
+		return true
+	}
+	for _, name := range strings.Split(v, ",") {
+		if strings.TrimSpace(name) == modelName {
+			return true
+		}
+	}
+	return false
 }
 
 // rollout is the ManifestWorkReplicaSet deploy reconcile (acm.md "Rollout

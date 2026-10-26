@@ -90,6 +90,8 @@ const (
 	LabelPlacementName                      = "work.open-cluster-management.io/placementname"
 	// LabelFailApply on a ManagedCluster makes its work fail to apply
 	// (acm.md item 11). A console-owned mock label, not a hub one.
+	// Value "true" fails every model's work on that cluster; any other
+	// non-empty value is a comma-separated list of model names that fail.
 	LabelFailApply = "ai-grid-mock/fail-apply"
 
 	// Feedback rule names and the resource identifiers of the two manifests

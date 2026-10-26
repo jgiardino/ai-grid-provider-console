@@ -281,9 +281,29 @@ export type ApiModel = {
   reason?: string;
   message?: string;
   /** Absent for a model served on the hub only. `locations` is proposal P8. */
-  placement?: ModelPlacementSpec & { locations?: string[] };
+  placement?: ModelPlacementSpec & { locations?: string[]; selectedClusters?: string[] };
+  /** The ManifestWorkReplicaSet status; `works` is the model's state on each decided cluster. */
+  rollout?: { works?: ApiModelWork[] };
   resourceVersion?: string;
   creationTimestamp?: string;
+};
+
+/** One generated ManifestWork from GET /models: the model's state on one cluster. */
+export type ApiModelWork = {
+  cluster: string;
+  applied?: string;
+  available?: string;
+  progressing?: string;
+  degraded?: string;
+  feedback?: { ready?: string; url?: string };
+};
+
+/** A model's deployment on one site, for the expandable Locations table. */
+export type ModelSiteWork = {
+  /** The ManagedCluster name the work targets. */
+  cluster: string;
+  /** Ready, Pending or Failed, from the work's conditions and feedback. */
+  phase: string;
 };
 
 /** A model deployment: its saved deployment and placement, and PR 12's phase. */
@@ -304,6 +324,12 @@ export type ManagedModel = {
   resourceVersion: string;
   /** The `location` labels of the clusters the placement decided on; empty without one. */
   locations: string[];
+  /**
+   * Per-cluster rollout works when the backend reported them. Absent or empty for a hub-only
+   * model, or for the in-memory mock until a placement has works; the page then falls back to
+   * `locations` with the model's overall phase.
+   */
+  works?: ModelSiteWork[];
   modelUri?: string;
   modelName?: string;
   runtimeImage?: string;

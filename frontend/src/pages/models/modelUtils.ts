@@ -20,3 +20,43 @@ export const locationLabel = (location: string, siteNames: Map<string, string>):
   const site = siteNames.get(location);
   return site ? `${site} (${location})` : location;
 };
+
+/** One row of the Models page's expandable per-site table. */
+export type ModelSiteDeployment = {
+  /** The location key; same set as the primary Locations column. */
+  id: string;
+  location: string;
+  phase: string;
+};
+
+/** Worst phase among works at one location: Failed > Pending > Ready. */
+const locationPhase = (phases: string[], fallback: string): string => {
+  if (phases.some((phase) => phase === 'Failed')) {
+    return 'Failed';
+  }
+  if (phases.length === 0) {
+    return fallback;
+  }
+  if (phases.every((phase) => phase === 'Ready')) {
+    return 'Ready';
+  }
+  return 'Pending';
+};
+
+/**
+ * Deployments under an expanded model row: one row per decided `location` (the same list as the
+ * primary Locations column). Status comes from rollout works on clusters at that location when
+ * the backend reported them; otherwise the model's overall phase.
+ */
+export const siteDeploymentsOf = (model: ManagedModel, clusters: GridCluster[]): ModelSiteDeployment[] => {
+  const fallback = model.phase ?? 'Pending';
+  return model.locations.map((location) => {
+    const clusterNames = new Set(
+      clusters.filter((cluster) => cluster.location === location).map((cluster) => cluster.name),
+    );
+    const phases = (model.works ?? [])
+      .filter((work) => clusterNames.has(work.cluster))
+      .map((work) => work.phase);
+    return { id: location, location, phase: locationPhase(phases, fallback) };
+  });
+};

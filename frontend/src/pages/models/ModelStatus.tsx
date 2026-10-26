@@ -1,8 +1,14 @@
 import { useState } from 'react';
 import { ExpandableSection, Label, Popover, Stack } from '@patternfly/react-core';
-import type { ManagedModel } from '../../api/types';
+import type { GridCluster, ManagedModel } from '../../api/types';
 import { getPhaseProps } from '../../utilities/phaseLabelUtils';
-import { failureExplanations, hasModelStatusDetails, modelPhase, modelStatusTitle } from './modelStatusInfo';
+import {
+  failureExplanations,
+  hasModelStatusDetails,
+  modelDisplayStatus,
+  modelPhase,
+  modelStatusTitle,
+} from './modelStatusInfo';
 
 /**
  * The status in words: a sentence and the next step for a known failure, else the controller's
@@ -27,31 +33,53 @@ export const ModelStatusDetails: React.FC<{ model: ManagedModel }> = ({ model })
   );
 };
 
-/** The model's phase as a label; when there's more to say, it opens the explanation in a popover. */
-export const ModelStatusLabel: React.FC<{ model: ManagedModel }> = ({ model }) => {
+type LabelProps = {
+  model: ManagedModel;
+  /** Clusters used to derive per-location readiness for Partially available. */
+  clusters?: GridCluster[];
+  /**
+   * When set (Models list), every non-Ready label opens this instead of a popover.
+   * Ready stays outline and not clickable.
+   */
+  onOpen?: () => void;
+};
+
+/**
+ * High-level model status: Ready is outline and not clickable; other statuses are filled.
+ * On the Models list, `onOpen` opens ModelStatusModal; elsewhere a popover may explain failures.
+ */
+export const ModelStatusLabel: React.FC<LabelProps> = ({ model, clusters = [], onOpen }) => {
   const [open, setOpen] = useState(false);
-  const phase = modelPhase(model);
-  const { icon, status, color } = getPhaseProps(phase);
-  const explained = hasModelStatusDetails(model);
+  const status = modelDisplayStatus(model, clusters);
+  const { icon, status: tone, color } = getPhaseProps(status);
+  const isReady = status === 'Ready';
+  const opensModal = !isReady && !!onOpen;
+  const opensPopover = !isReady && !onOpen && hasModelStatusDetails(model, clusters);
   const label = (
     <Label
-      isCompact
       icon={icon}
-      status={status}
+      status={tone}
       color={color}
-      variant="filled"
-      onClick={explained ? () => setOpen((previous) => !previous) : undefined}
+      variant={isReady ? 'outline' : 'filled'}
+      isClickable={opensModal || opensPopover}
+      onClick={
+        opensModal
+          ? onOpen
+          : opensPopover
+            ? () => setOpen((previous) => !previous)
+            : undefined
+      }
     >
-      {phase}
+      {status}
     </Label>
   );
   return (
     <span data-testid="model-phase">
-      {explained ? (
+      {opensPopover ? (
         <Popover
           isVisible={open}
           shouldClose={() => setOpen(false)}
-          headerContent={modelStatusTitle(model)}
+          headerContent={modelStatusTitle(model, clusters)}
           bodyContent={<ModelStatusDetails model={model} />}
         >
           {label}

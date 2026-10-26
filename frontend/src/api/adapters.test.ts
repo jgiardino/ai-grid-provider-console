@@ -311,6 +311,12 @@ describe('toManagedModel', () => {
     expect(byName('codellama-13b').locations).toEqual([]);
   });
 
+  it('maps rollout works to per-site phases', () => {
+    expect(byName('granite-8b-instruct').works).toEqual([{ cluster: 'site-paris-1', phase: 'Ready' }]);
+    expect(byName('mistral-7b-instruct').works).toEqual([{ cluster: 'site-frankfurt-1', phase: 'Pending' }]);
+    expect(byName('tiny-llm').works).toEqual([]);
+  });
+
   it('has no locations without a placement', () => {
     expect(byName('tiny-llm').locations).toEqual([]);
   });
